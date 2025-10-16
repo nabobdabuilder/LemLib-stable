@@ -5,40 +5,36 @@
 // controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-// motor groups - using port numbers directly with correct PROS V5 API
+// Drivetrain motor groups
+pros::MotorGroup leftMotors({-11, 12, -13}, pros::v5::MotorGears::blue);
+pros::MotorGroup rightMotors({18, -19, 20}, pros::v5::MotorGears::blue);
 
+// Mechanism motors - 200rpm (green cartridge)
+pros::Motor frontIntake(-1, pros::v5::MotorGears::green);   // port 1, reversed, 200rpm
+pros::Motor midRoller(7, pros::v5::MotorGears::green);      // port 7, middle roller, 200rpm
+pros::Motor backRoller(9, pros::v5::MotorGears::green);     // port 9, back bottom, forward, 200rpm
+pros::Motor backTop(-10, pros::v5::MotorGears::green);      // port 10, back top/outtake, reversed, 200rpm
 
-// Create motor groups
-pros::MotorGroup leftMotors({1, 2, 3});
-pros::MotorGroup rightMotors({4, 5, 6});
-
-// Test motors with individual initialization
-pros::Motor testMotor(-20);
-pros::Motor testMotor2(-19);
-pros::Motor testMotor3(-18);
-pros::Motor testMotor4(-17);
-// Toggle state for testMotor3
-bool testMotor3Running = false;
-bool lastL1State = false;
-bool lastL2State = false;
-
-// Inertial Sensor on port 10
-pros::Imu imu(10);
+// Sensors
+pros::Optical optical(6);        // port 6, optical sensor
+pros::Imu imu(5);                // port 5, inertial sensor
 
 // tracking wheels
-// horizontal tracking wheel encoder. Rotation sensor, port 20, not reversed
-pros::Rotation horizontalEnc(17);
-// vertical tracking wheel encoder. Rotation sensor, port 11, reversed
-pros::Rotation verticalEnc(16);
+// horizontal tracking wheel encoder. Rotation sensor, port 14
+pros::Rotation horizontalEnc(14);
+// vertical tracking wheel (perpendicular odom). Rotation sensor, port 8
+pros::Rotation verticalEnc(8);
 // horizontal tracking wheel. 2.75" diameter, 5.75" offset, back of the robot (negative)
-lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_2, -3.25);
+lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_2, 0.75);
 // vertical tracking wheel. 2.75" diameter, 2.5" offset, left of the robot (negative)
-lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_2, 0.5);
+lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_2, 1.5);
+
+// Remove the old perpOdom since we're using verticalEnc for perpendicular odometry
 
 // drivetrain settings
 lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
                               &rightMotors, // right motor group
-                              10.7, // 10 inch track width
+                              10.75, // 10.75 inch track width
                               lemlib::Omniwheel::NEW_325, // using new 4" omnis
                               450, // drivetrain rpm is 360
                               2 // horizontal drift is 2. If we had traction wheels, it would have been 8
@@ -173,7 +169,7 @@ void autonomous() {
     pros::lcd::print(4, "pure pursuit finished!");
     */
 
-    chassis.moveToPose(0, 24, 0, 4000);
+    chassis.moveToPose(0, 24, 0, 5000);
     chassis.waitUntilDone();
     chassis.cancelMotion();
 }
@@ -182,33 +178,61 @@ void autonomous() {
  * Runs in driver control
  */
 void opcontrol() {
+    // Set brake modes
+    leftMotors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    rightMotors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    frontIntake.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    backTop.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    midRoller.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    backRoller.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
     // Main control loop
     while (true) {
-        testMotor.move_velocity(200);
-        testMotor3.move_velocity(600);
-        // When X is pressed: both motors spin backwards at 100% speed
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_X)) {
-            testMotor2.move_velocity(200);  // Motor 19 (testMotor2) backward at 100%
-            testMotor4.move_velocity(200);  // Motor 17 (testMotor4) backward at 100%
+        // R2 (Long Goal Scoring)
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
+            backRoller.move_velocity(200);    // back bottom forward
+            midRoller.move_velocity(200);     // mid roller forward
+            backTop.move_velocity(200);       // back top forward
+            frontIntake.move_velocity(0);     // front intake off
         }
-        // When Y is pressed: both motors spin forwards, motor 17 (testMotor4) faster than motor 19 (testMotor2)
-        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_Y)) {
-            testMotor2.move_velocity(-50);   // Motor 19 (testMotor2) forward at 67% speed
-            testMotor4.move_velocity(-180);   // Motor 17 (testMotor4) forward at 100% speed
+        // R1 (Intaking/Main Priming)
+        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
+            backRoller.move_velocity(200);    // back bottom forward
+            frontIntake.move_velocity(200);   // front intake forward
+            midRoller.move_velocity(200);     // mid roller forward
+            backTop.move_velocity(0);         // back top off
         }
-        // When B is pressed: both motors spin forwards, motor 19 (testMotor2) faster than motor 17 (testMotor4)
-        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_B)) {
-            testMotor2.move_velocity(-180);   // Motor 19 (testMotor2) forward at 100% speed
-            testMotor4.move_velocity(-50);   // Motor 17 (testMotor4) forward at 67% speed
+        // A (Low Goal Scoring)
+        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_A)) {
+            frontIntake.move_velocity(-200);  // front intake reverse
+            midRoller.move_velocity(-200);    // mid roller reverse
+            backRoller.move_velocity(0);      // back bottom off
+            backTop.move_velocity(0);         // back top off
         }
-        // When no button is pressed: stop both motors
+        // L1 (Mid Goal Scoring)
+        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
+            backRoller.move_velocity(200);    // back bottom forward
+            backTop.move_velocity(-200);      // back top reverse
+            frontIntake.move_velocity(0);     // front intake off
+            midRoller.move_velocity(0);       // mid roller off
+        }
+        // L2 (Intake Straight to Basket)
+        else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
+            frontIntake.move_velocity(200);   // front intake forward
+            midRoller.move_velocity(200);     // mid roller forward
+            backRoller.move_velocity(0);      // back bottom off
+            backTop.move_velocity(0);         // back top off
+        }
+        // When no button is pressed: stop all motors
         else {
-            testMotor2.move_velocity(0);
-            testMotor4.move_velocity(0);
+            backRoller.move_velocity(0);
+            frontIntake.move_velocity(0);
+            midRoller.move_velocity(0);
+            backTop.move_velocity(0);
         }
 
         // Small delay to prevent the loop from running too fast
         pros::delay(20);
-}
-}
+        
+    }
+}           
